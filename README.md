@@ -42,9 +42,8 @@
     <li>
       <a href="#usage">Usage</a>
          <ul>
-            <li><a href="#analyze-zsh">Analyze ZSH History</a></li>
-            <li><a href="#analyze-bash">Analyze Bash History</a></li>
-           <li><a href="#regex-scan">Regex Scan on Shell History</a></li>
+            <li><a href="#extract-shell-history">Analyze ZSH History</a></li>
+           <li><a href="#extract-secrets">Regex Scan on Shell History</a></li>
          </ul>
    </li>
     <li><a href="#reports">Reports</a></li>
