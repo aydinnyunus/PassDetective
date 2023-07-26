@@ -102,6 +102,8 @@ If you want to specify directory use this command:
    $ PassDetective extract --secrets --zsh
 ```
 
+![Secrets](https://i.imgur.com/yw3v0RI.png)
+
 ## Regular Expressions
 PassDetective uses the following regular expressions to identify potential sensitive information:
 
