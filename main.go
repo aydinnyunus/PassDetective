@@ -1,7 +1,7 @@
 package main
 
 import (
-	"main.go/cmd"
+	"github.com/aydinnyunus/PassDetective/cmd"
 )
 
 func main() {
