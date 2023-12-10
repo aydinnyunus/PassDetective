@@ -1,4 +1,4 @@
-module main.go
+module github.com/aydinnyunus/PassDetective
 
 go 1.20
 
