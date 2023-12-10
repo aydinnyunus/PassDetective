@@ -68,6 +68,12 @@ PassDetective is a command-line tool that scans your shell command history for m
 go install github.com/aydinnyunus/PassDetective@latest
 ```
 
+[Kali Linux](https://www.kali.org/tools/passdetective/)
+
+```bash
+sudo apt-get install PassDetective
+```
+
 ## Features
 
 - Scans shell command history to detect mistakenly written passwords
