@@ -5,7 +5,7 @@ package cmd
 
 import (
 	"github.com/fatih/color"
-	"main.go/pkg/util"
+	"github.com/aydinnyunus/PassDetective/pkg/util"
 	"os"
 	"strings"
 
