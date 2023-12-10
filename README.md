@@ -71,8 +71,11 @@ go install github.com/aydinnyunus/PassDetective@latest
 [Kali Linux](https://www.kali.org/tools/passdetective/)
 
 ```bash
-sudo apt-get install PassDetective
+sudo apt install PassDetective
 ```
+
+<img width="1727" alt="image" src="https://github.com/aydinnyunus/PassDetective/assets/52822869/dc12e543-3454-423b-b3fe-0511f93e2c3e">
+
 
 ## Features
 
