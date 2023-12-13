@@ -15,7 +15,9 @@ builds:
       - windows
       - darwin
     ldflags:
-      - -s -w -extldflags '-static'
+      - -s -w -X main.build={{.Version}} 
+      - ./usemsan=-msan
+
 archives:
   - format: tar.gz
     # this name template makes the OS and Arch compatible with the results of `uname`.
