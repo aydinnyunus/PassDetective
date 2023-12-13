@@ -23,7 +23,7 @@ builds:
       - windows
       - darwin
     ldflags:
-      - -s -w -X main.build={{.Version}} 
+      - -s -w -extldflags '-static' -X main.build={{.Version}}
 archives:
   - format: tar.gz
     # this name template makes the OS and Arch compatible with the results of `uname`.
