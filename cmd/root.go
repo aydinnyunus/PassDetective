@@ -11,7 +11,7 @@ import (
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "main.go",
+	Use:   "PassDetective",
 	Short: "Extract passwords from shell history change descriptions",
 	Long: `The "extract" command allows you to automatically extract passwords from shell history change descriptions.
 By analyzing the history of shell commands, this tool can identify and extract passwords that were used during
