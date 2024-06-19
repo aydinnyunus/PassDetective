@@ -76,6 +76,12 @@ sudo apt install PassDetective
 
 <img width="1727" alt="image" src="https://github.com/aydinnyunus/PassDetective/assets/52822869/dc12e543-3454-423b-b3fe-0511f93e2c3e">
 
+For Nix or NixOS is [pre-packed module](https://search.nixos.org/packages?channel=unstable&query=passdetective)
+available. The lastest release is usually present in the ``unstable`` channel.
+
+```bash
+$ nix-env -iA nixpkgs.passdetective
+```
 
 ## Features
 
