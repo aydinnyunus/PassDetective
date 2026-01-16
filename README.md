@@ -17,7 +17,7 @@
 
   <p align="center">
     <br />
-    <a href="https://github.com/aydinnyunus/PassDetective"><strong>Explore the docs »</strong></a>
+    <a href="https://aydinnyunus.github.io/2025/12/14/passdetective-kali-linux/"><strong>Blog Post »</strong></a>
     <br />
     <br />
     ·
