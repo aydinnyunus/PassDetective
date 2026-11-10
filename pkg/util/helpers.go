@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/fatih/color"
@@ -15,6 +16,13 @@ var aliases []string
 
 // RedactOutput aktif olduğunda ekrana basılan secret değerlerini maskeler
 var RedactOutput bool
+
+// lookPathCache, exec.LookPath sonuçlarını süreç ömrü boyunca önbellekler.
+// Bir tarama sırasında PATH değişmez, bu yüzden invalidasyon gerekmez.
+var lookPathCache = make(map[string]bool, 512)
+
+// aliasSet, alias üyelik kontrolünü O(1) yapmak için tutulur.
+var aliasSet = make(map[string]bool, 64)
 
 // Kabuk içinde yerleşik (built-in) bulunan komutlar PATH'te ayrı binary olmayabilir
 var shellBuiltins = map[string]bool{
@@ -304,6 +312,7 @@ func isStringInArray(target string, array []string) bool {
 
 func IsAliasInConfigFile(configFile string) []string {
 	aliases = nil
+	aliasSet = make(map[string]bool, 64)
 
 	data, err := os.ReadFile(configFile)
 	if err != nil {
@@ -324,6 +333,7 @@ func IsAliasInConfigFile(configFile string) []string {
 			fields := strings.Fields(line)
 			if len(fields) >= 2 {
 				aliases = append(aliases, fields[1])
+				aliasSet[fields[1]] = true
 			}
 			continue
 		}
@@ -339,12 +349,14 @@ func IsAliasInConfigFile(configFile string) []string {
 			aliasName := strings.TrimSpace(parts[0])
 			if aliasName != "" {
 				aliases = append(aliases, aliasName)
+				aliasSet[aliasName] = true
 			}
 		} else {
 			// Fish boşluklu alias formatı: alias ll 'ls -la'
 			fields := strings.Fields(rest)
 			if len(fields) >= 2 {
 				aliases = append(aliases, fields[0])
+				aliasSet[fields[0]] = true
 			}
 		}
 	}
@@ -383,7 +395,7 @@ func isValidCommand(command string) bool {
 		return true
 	}
 
-	if isStringInArray(command, aliases) {
+	if aliasSet[command] {
 		return true
 	}
 
@@ -391,9 +403,16 @@ func isValidCommand(command string) bool {
 		return true
 	}
 
+	// exec.LookPath her çağrıda PATH'i baştan tarar; sonucu önbellekle.
+	if valid, ok := lookPathCache[command]; ok {
+		return valid
+	}
+
 	// Dışarıdan güvensiz ve yavaş 'which' / 'bash -c' çalıştırmak yerine doğrudan PATH kontrolü
 	_, err := exec.LookPath(command)
-	return err == nil
+	valid := err == nil
+	lookPathCache[command] = valid
+	return valid
 }
 
 func extractSecretPassword(input string) (string, error) {
@@ -431,27 +450,21 @@ func newHistoryScanner(f *os.File) *bufio.Scanner {
 	return scanner
 }
 
-func ProcessZshHistoryFile(historyFile string) {
-	f, err := os.Open(historyFile)
-	if err != nil {
-		color.Red("Error opening zsh history file %s: %v\n", historyFile, err)
-		return
-	}
-	defer f.Close()
-
-	scanner := newHistoryScanner(f)
+// joinLogicalLines zsh geçmiş satırlarını ters-slash devam satırlarına göre birleştirir.
+// Girdi: geçmiş dosyasındaki ham satırlar. Çıktı: mantıksal (birleştirilmiş) komut satırları.
+func joinLogicalLines(lines []string) []string {
+	var out []string
 	var fullLine string
 	inContinuation := false
 
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
 		if line == "" {
 			continue
 		}
 
-		// Önceki satır '\' ile bittiyse devam satırını birleştir
 		if inContinuation {
-			fullLine += " " + line
+			fullLine = strings.TrimRight(fullLine, " ") + " " + line
 		} else {
 			fullLine = line
 		}
@@ -462,18 +475,41 @@ func ProcessZshHistoryFile(historyFile string) {
 			continue
 		}
 		inContinuation = false
+		out = append(out, fullLine)
+		fullLine = ""
+	}
 
+	if inContinuation && fullLine != "" {
+		out = append(out, fullLine)
+	}
+
+	return out
+}
+
+func ProcessZshHistoryFile(historyFile string) {
+	f, err := os.Open(historyFile)
+	if err != nil {
+		color.Red("Error opening zsh history file %s: %v\n", historyFile, err)
+		return
+	}
+	defer f.Close()
+
+	scanner := newHistoryScanner(f)
+	var rawLines []string
+
+	for scanner.Scan() {
+		rawLines = append(rawLines, scanner.Text())
+	}
+
+	for _, fullLine := range joinLogicalLines(rawLines) {
 		currentCommand, err := extractSecretPassword(fullLine)
 		if err != nil || currentCommand == "" {
-			fullLine = ""
 			continue
 		}
 
 		if !isValidCommand(currentCommand) {
 			color.Yellow("Invalid command in %s: %s\n", historyFile, maskIfRedacted(currentCommand))
 		}
-
-		fullLine = ""
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -644,10 +680,11 @@ func ProcessFishHistoryFileRegex(historyFile string) {
 }
 
 func maskString(s string) string {
-	if len(s) <= 6 {
+	runes := []rune(s)
+	if len(runes) <= 6 {
 		return "****"
 	}
-	return s[:3] + strings.Repeat("*", len(s)-5) + s[len(s)-2:]
+	return string(runes[:3]) + strings.Repeat("*", len(runes)-5) + string(runes[len(runes)-2:])
 }
 
 func maskIfRedacted(input string) string {
@@ -658,22 +695,91 @@ func maskIfRedacted(input string) string {
 }
 
 func DetectRegexes(input string) map[string]bool {
-	matchedResults := make(map[string]bool, len(compiledRegexes))
+	var matchedResults map[string]bool
+
+	// Ilk gecis: eslesen etiketleri topla ve TUM desenlerin eslesme araliklarini birlestir.
+	// Her deseni ayri ayri maskelemek, bir satirdaki diger sirlari acikta birakir.
+	var spans [][]int
+	matchedLabels := make([]string, 0, 4)
 
 	for label, re := range compiledRegexes {
-		match := re.MatchString(input)
-		matchedResults[label] = match
-
-		if match {
-			color.Green(label)
-			if RedactOutput {
-				maskedLine := re.ReplaceAllStringFunc(input, maskString)
-				color.Red(maskedLine)
-			} else {
-				color.Red(input)
-			}
+		indexes := re.FindAllStringIndex(input, -1)
+		if len(indexes) == 0 {
+			continue
 		}
+		if matchedResults == nil {
+			matchedResults = make(map[string]bool, 4)
+		}
+		matchedResults[label] = true
+		matchedLabels = append(matchedLabels, label)
+		spans = append(spans, indexes...)
+	}
+
+	if len(matchedLabels) == 0 {
+		return matchedResults
+	}
+
+	sort.Strings(matchedLabels)
+
+	redacted := input
+	if RedactOutput {
+		redacted = redactSpans(input, spans)
+	}
+
+	// Her etiket icin tam satiri, tum maskeleme uygulanmis haliyle bir kez bas.
+	for _, label := range matchedLabels {
+		color.Green(label)
+		color.Red(redacted)
 	}
 
 	return matchedResults
+}
+
+// redactSpans verilen [start,end) araliklarinin birlesimini maskString ile maskeler.
+func redactSpans(input string, spans [][]int) string {
+	if len(spans) == 0 {
+		return input
+	}
+
+	sorted := make([][]int, len(spans))
+	copy(sorted, spans)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i][0] != sorted[j][0] {
+			return sorted[i][0] < sorted[j][0]
+		}
+		return sorted[i][1] < sorted[j][1]
+	})
+
+	type interval struct{ start, end int }
+	merged := make([]interval, 0, len(sorted))
+	for _, s := range sorted {
+		start, end := s[0], s[1]
+		if start < 0 {
+			start = 0
+		}
+		if end > len(input) {
+			end = len(input)
+		}
+		if start >= end {
+			continue
+		}
+		if n := len(merged); n > 0 && start <= merged[n-1].end {
+			if end > merged[n-1].end {
+				merged[n-1].end = end
+			}
+			continue
+		}
+		merged = append(merged, interval{start, end})
+	}
+
+	var b strings.Builder
+	prev := 0
+	for _, iv := range merged {
+		b.WriteString(input[prev:iv.start])
+		b.WriteString(maskString(input[iv.start:iv.end]))
+		prev = iv.end
+	}
+	b.WriteString(input[prev:])
+
+	return b.String()
 }
