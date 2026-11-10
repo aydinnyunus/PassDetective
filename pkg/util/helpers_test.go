@@ -38,7 +38,11 @@ export PATH=$PATH:/usr/local/bin
 }
 
 func TestIsValidCommand(t *testing.T) {
+	savedAliases, savedAliasSet := aliases, aliasSet
+	defer func() { aliases, aliasSet = savedAliases, savedAliasSet }()
+
 	aliases = []string{"ll", "mycustomcmd"}
+	aliasSet = map[string]bool{"ll": true, "mycustomcmd": true}
 
 	validCases := []string{
 		"cd",
@@ -215,36 +219,118 @@ func TestMaskString(t *testing.T) {
 	}
 }
 
+func TestJoinLogicalLines(t *testing.T) {
+	lines := []string{
+		": 1689951023:0;curl -X POST \\",
+		"  -H \"Authorization: Bearer ghp_1234567890abcdefghijklmnopqrstuvwxyz\" \\",
+		"  https://api.github.com/user",
+		": 1689951100:0;git status",
+	}
+
+	got := joinLogicalLines(lines)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 logical commands, got %d: %#v", len(got), got)
+	}
+
+	wantFirst := ": 1689951023:0;curl -X POST -H \"Authorization: Bearer ghp_1234567890abcdefghijklmnopqrstuvwxyz\" https://api.github.com/user"
+	if strings.Join(strings.Fields(got[0]), " ") != strings.Join(strings.Fields(wantFirst), " ") {
+		t.Errorf("continuation join mismatch:\n got: %q\nwant: %q", got[0], wantFirst)
+	}
+	if got[1] != ": 1689951100:0;git status" {
+		t.Errorf("unexpected second command: %q", got[1])
+	}
+}
+
+func TestJoinLogicalLinesFlushesTrailingContinuation(t *testing.T) {
+	lines := []string{": 1:0;echo hello \\"}
+	got := joinLogicalLines(lines)
+	if len(got) != 1 {
+		t.Fatalf("expected a trailing continuation to be flushed, got %d", len(got))
+	}
+	if strings.TrimSpace(got[0]) != ": 1:0;echo hello" {
+		t.Errorf("unexpected flush result: %q", got[0])
+	}
+}
+
 func TestProcessZshHistoryMultiLine(t *testing.T) {
 	tmpDir := t.TempDir()
 	histFile := filepath.Join(tmpDir, ".zsh_history")
 
-	content := `: 1689951023:0;curl -X POST \
-  -H "Authorization: Bearer ghp_1234567890abcdefghijklmnopqrstuvwxyz" \
-  https://api.github.com/user
-`
+	content := ": 1689951023:0;curl -X POST \\\n" +
+		"  -H \"Authorization: Bearer ghp_1234567890abcdefghijklmnopqrstuvwxyz\" \\\n" +
+		"  https://api.github.com/user\n"
 	if err := os.WriteFile(histFile, []byte(content), 0600); err != nil {
 		t.Fatalf("failed to write temp history: %v", err)
 	}
 
-	// Çok satırlı zsh komutunun paniklemeden ve hatasız işlendiğini doğrula
+	// Birleştirme mantığı doğru olmalı: 3 fiziksel satır -> 1 mantıksal komut.
+	raw, err := os.ReadFile(histFile)
+	if err != nil {
+		t.Fatalf("failed to read temp history: %v", err)
+	}
+	logical := joinLogicalLines(strings.Split(strings.TrimRight(string(raw), "\n"), "\n"))
+	if len(logical) != 1 {
+		t.Fatalf("expected 1 joined command, got %d: %#v", len(logical), logical)
+	}
+	if !strings.Contains(logical[0], "ghp_1234567890abcdefghijklmnopqrstuvwxyz") {
+		t.Errorf("expected continuation token to survive the join, got %q", logical[0])
+	}
+
 	ProcessZshHistoryFileRegex(histFile)
 	ProcessZshHistoryFile(histFile)
+}
+
+func TestExtractFishCommand(t *testing.T) {
+	cases := []struct {
+		line string
+		want string
+		ok   bool
+	}{
+		{"- cmd: git status", "git status", true},
+		{"- cmd: set -x OPENAI_API_KEY sk-proj-abc", "set -x OPENAI_API_KEY sk-proj-abc", true},
+		{"- cmd: ", "", false},
+		{"  when: 1689951000", "", false},
+		{"not a history line", "", false},
+	}
+
+	for _, tc := range cases {
+		got, ok := extractFishCommand(tc.line)
+		if ok != tc.ok || got != tc.want {
+			t.Errorf("extractFishCommand(%q) = (%q, %v), want (%q, %v)", tc.line, got, ok, tc.want, tc.ok)
+		}
+	}
 }
 
 func TestProcessFishHistory(t *testing.T) {
 	tmpDir := t.TempDir()
 	fishHist := filepath.Join(tmpDir, "fish_history")
 
-	content := `- cmd: git status
-  when: 1689951000
-- cmd: set -x OPENAI_API_KEY sk-proj-1234567890abcdefghijklmnopqrstuvwxyz123456
-  when: 1689951010
-- cmd: YanlisliklaFishSifresi123
-  when: 1689951020
-`
+	content := "- cmd: git status\n" +
+		"  when: 1689951000\n" +
+		"- cmd: set -x OPENAI_API_KEY sk-proj-1234567890abcdefghijklmnopqrstuvwxyz123456\n" +
+		"  when: 1689951010\n" +
+		"- cmd: YanlisliklaFishSifresi123\n" +
+		"  when: 1689951020\n"
 	if err := os.WriteFile(fishHist, []byte(content), 0600); err != nil {
 		t.Fatalf("failed to write temp fish history: %v", err)
+	}
+
+	// Parser'ın beklenen sayıda ve içerikte komut tanıdığını doğrula.
+	raw, err := os.ReadFile(fishHist)
+	if err != nil {
+		t.Fatalf("failed to read temp fish history: %v", err)
+	}
+	var parsed []string
+	for _, line := range strings.Split(strings.TrimRight(string(raw), "\n"), "\n") {
+		if cmd, ok := extractFishCommand(line); ok {
+			parsed = append(parsed, cmd)
+		}
+	}
+	if len(parsed) != 3 {
+		t.Fatalf("expected 3 fish commands, got %d: %#v", len(parsed), parsed)
+	}
+	if parsed[0] != "git status" || !strings.Contains(parsed[1], "OPENAI_API_KEY") {
+		t.Errorf("unexpected parsed commands: %#v", parsed)
 	}
 
 	ProcessFishHistoryFile(fishHist)
