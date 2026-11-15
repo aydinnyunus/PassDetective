@@ -4,20 +4,28 @@ Copyright © 2023 Yunus AYDIN <aydinnyunus@gmail.com>
 package cmd
 
 import (
-	"github.com/fatih/color"
-	"github.com/aydinnyunus/PassDetective/pkg/util"
 	"os"
-	"strings"
+	"path/filepath"
 
+	"github.com/aydinnyunus/PassDetective/pkg/util"
+	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
-
-var aliases []string
 
 var secrets bool
 var bash bool
 var zsh bool
+var fish bool
 var all bool
+var redact bool
+
+func getHomeDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return os.Getenv("HOME")
+	}
+	return home
+}
 
 // extractCmd represents the extract command
 var extractCmd = &cobra.Command{
@@ -30,120 +38,132 @@ previous commands and display them for further inspection or use.
 	Run: func(cmd *cobra.Command, args []string) {
 		zsh, _ = cmd.Flags().GetBool("zsh")
 		bash, _ = cmd.Flags().GetBool("bash")
+		fish, _ = cmd.Flags().GetBool("fish")
 		secrets, _ = cmd.Flags().GetBool("secrets")
 		all, _ = cmd.Flags().GetBool("all")
+		redact, _ = cmd.Flags().GetBool("redact")
+
+		util.RedactOutput = redact
 
 		if all {
 			zsh = true
 			bash = true
+			fish = true
 		}
 
-		if zsh == false && bash == false {
-			cmd.Println("__________                     ________           __                  __   __              \n\\______   \\____    ______ ____________ \\   ____ _/  |_  ____   ____ _/  |_|__|__  __ ____  \n |     ___/__  \\  /  ___//  ___/|    |  \\_/ __ \\\\   __\\/ __ \\_/ ___\\\\   __\\  |  \\/ // __ \\ \n |    |    / __ \\_\\___ \\ \\___ \\ |    |   \\  ___/_|  | \\  ___/_  \\___ |  | |  |\\   /\\  ___/_\n |____|   (____  /____  \\____  \\_______  /\\___  /|__|  \\___  /\\___  /|__| |__| \\_/  \\___  /\n               \\/     \\/     \\/        \\/     \\/           \\/     \\/                    \\/ \n")
+		if !zsh && !bash && !fish {
+			cmd.Println("__________                     ________           __                  __   __              \n\\______   \\____    ______ ____________ \\   ____ _/  |_  ____   ____ _/  |_|__|__  __ ____  \n |     ___/__  \\  /  ___//  ___/|    |  \\_/ __ \\\\   __\\/ __ \\_/ ___\\\\   __\\  |  \\/ // __ \\ \n |    |    / __ \\_\\___ \\ \\___ \\ |    |   \\  ___/_|  | \\  ___/_  \\___ |  | |  |\\   /\\  ___/_\n |____|   (____  /____  \\____  \\_______  /\\___  /|__|  \\___  /\\___  /|__| |__| \\_/  \\___  /\n               \\/     \\/     \\/        \\/     \\/           \\/     \\/                    \\/ ")
 			cmd.Help()
+			return
 		}
 
-		if secrets && zsh {
-			zshHistoryFile := "~/.zsh_history"
+		homeDir := getHomeDir()
+		zshHistoryFile := filepath.Join(homeDir, ".zsh_history")
+		zshrcFile := filepath.Join(homeDir, ".zshrc")
+		bashHistoryFile := filepath.Join(homeDir, ".bash_history")
+		bashrcFile := filepath.Join(homeDir, ".bashrc")
+		fishHistoryFile := filepath.Join(homeDir, ".local", "share", "fish", "fish_history")
+		fishConfigFile := filepath.Join(homeDir, ".config", "fish", "config.fish")
 
-			// Expand "~" to the user's home directory
-			zshHistoryFile = strings.ReplaceAll(zshHistoryFile, "~", os.Getenv("HOME"))
-
-			zshrc := "~/.zshrc"
-			zshrcFile := strings.ReplaceAll(zshrc, "~", os.Getenv("HOME"))
-			aliases = util.IsAliasInConfigFile(zshrcFile)
-
-			// Check if the zsh history file exists and process it
-			if _, err := os.Stat(zshHistoryFile); err == nil {
-				color.Cyan("===============================================================")
-
-				color.Cyan("Scan is started.")
-				color.Cyan("===============================================================")
-
-				util.ProcessZshHistoryFileRegex(zshHistoryFile)
-				color.Cyan("===============================================================")
-
-				color.Cyan("Scan is finished.")
-				color.Cyan("===============================================================")
-
-			} else {
-				color.Yellow("Zsh history file not found: %s\n", zshHistoryFile)
+		// --secrets ile seçilen tüm kabukları (zsh, bash, fish) sırayla taraması için
+		// önceki os.Exit(0) ve else-if bloğu kaldırıldı.
+		if secrets {
+			if zsh {
+				if _, err := os.Stat(zshHistoryFile); err == nil {
+					color.Cyan("===============================================================")
+					color.Cyan("Zsh secret scan is started.")
+					color.Cyan("===============================================================")
+					util.ProcessZshHistoryFileRegex(zshHistoryFile)
+					color.Cyan("===============================================================")
+					color.Cyan("Zsh secret scan is finished.")
+					color.Cyan("===============================================================")
+				} else {
+					color.Yellow("Zsh history file not found: %s\n", zshHistoryFile)
+				}
 			}
-			os.Exit(0)
-		} else if secrets && bash {
-			bashHistoryFile := "~/.bash_history"
 
-			// Expand "~" to the user's home directory
-			bashHistoryFile = strings.ReplaceAll(bashHistoryFile, "~", os.Getenv("HOME"))
-
-			bashrc := "~/.bashrc"
-			bashrcFile := strings.ReplaceAll(bashrc, "~", os.Getenv("HOME"))
-			aliases = util.IsAliasInConfigFile(bashrcFile)
-
-			// Check if the bash history file exists and process it
-			if _, err := os.Stat(bashHistoryFile); err == nil {
-				color.Cyan("===============================================================")
-				color.Cyan("Scan is started.")
-				color.Cyan("===============================================================")
-				util.ProcessBashHistoryFileRegex(bashHistoryFile)
-				color.Cyan("===============================================================")
-				color.Cyan("Scan is finished.")
-				color.Cyan("===============================================================")
-
-			} else {
-				color.Yellow("Bash history file not found: %s\n", bashHistoryFile)
+			if bash {
+				if _, err := os.Stat(bashHistoryFile); err == nil {
+					color.Cyan("===============================================================")
+					color.Cyan("Bash secret scan is started.")
+					color.Cyan("===============================================================")
+					util.ProcessBashHistoryFileRegex(bashHistoryFile)
+					color.Cyan("===============================================================")
+					color.Cyan("Bash secret scan is finished.")
+					color.Cyan("===============================================================")
+				} else {
+					color.Yellow("Bash history file not found: %s\n", bashHistoryFile)
+				}
 			}
-			os.Exit(0)
+
+			if fish {
+				if _, err := os.Stat(fishHistoryFile); err == nil {
+					color.Cyan("===============================================================")
+					color.Cyan("Fish secret scan is started.")
+					color.Cyan("===============================================================")
+					util.ProcessFishHistoryFileRegex(fishHistoryFile)
+					color.Cyan("===============================================================")
+					color.Cyan("Fish secret scan is finished.")
+					color.Cyan("===============================================================")
+				} else {
+					color.Yellow("Fish history file not found: %s\n", fishHistoryFile)
+				}
+			}
+			return
 		}
+
 		if zsh {
-			zshHistoryFile := "~/.zsh_history"
+			if _, err := os.Stat(zshrcFile); err == nil {
+				util.IsAliasInConfigFile(zshrcFile)
+			}
 
-			// Expand "~" to the user's home directory
-			zshHistoryFile = strings.ReplaceAll(zshHistoryFile, "~", os.Getenv("HOME"))
-
-			zshrc := "~/.zshrc"
-			zshrcFile := strings.ReplaceAll(zshrc, "~", os.Getenv("HOME"))
-			aliases = util.IsAliasInConfigFile(zshrcFile)
-
-			// Check if the zsh history file exists and process it
 			if _, err := os.Stat(zshHistoryFile); err == nil {
-				color.Cyan("Scan is started.")
+				color.Cyan("===============================================================")
+				color.Cyan("Zsh scan is started.")
+				color.Cyan("===============================================================")
 				util.ProcessZshHistoryFile(zshHistoryFile)
-				color.Cyan("Scan is finished.")
-
+				color.Cyan("===============================================================")
+				color.Cyan("Zsh scan is finished.")
+				color.Cyan("===============================================================")
 			} else {
 				color.Yellow("Zsh history file not found: %s\n", zshHistoryFile)
 			}
-
 		}
 
 		if bash {
-			bashHistoryFile := "~/.bash_history"
+			if _, err := os.Stat(bashrcFile); err == nil {
+				util.IsAliasInConfigFile(bashrcFile)
+			}
 
-			// Expand "~" to the user's home directory
-			bashHistoryFile = strings.ReplaceAll(bashHistoryFile, "~", os.Getenv("HOME"))
-
-			bashrc := "~/.bashrc"
-			bashrcFile := strings.ReplaceAll(bashrc, "~", os.Getenv("HOME"))
-			aliases = util.IsAliasInConfigFile(bashrcFile)
-
-			// Check if the bash history file exists and process it
 			if _, err := os.Stat(bashHistoryFile); err == nil {
 				color.Cyan("===============================================================")
-
-				color.Cyan("Scan is started.")
+				color.Cyan("Bash scan is started.")
 				color.Cyan("===============================================================")
-
 				util.ProcessBashHistoryFile(bashHistoryFile)
 				color.Cyan("===============================================================")
-
-				color.Cyan("Scan is finished.")
+				color.Cyan("Bash scan is finished.")
 				color.Cyan("===============================================================")
-
 			} else {
 				color.Yellow("Bash history file not found: %s\n", bashHistoryFile)
 			}
+		}
 
+		if fish {
+			if _, err := os.Stat(fishConfigFile); err == nil {
+				util.IsAliasInConfigFile(fishConfigFile)
+			}
+
+			if _, err := os.Stat(fishHistoryFile); err == nil {
+				color.Cyan("===============================================================")
+				color.Cyan("Fish scan is started.")
+				color.Cyan("===============================================================")
+				util.ProcessFishHistoryFile(fishHistoryFile)
+				color.Cyan("===============================================================")
+				color.Cyan("Fish scan is finished.")
+				color.Cyan("===============================================================")
+			} else {
+				color.Yellow("Fish history file not found: %s\n", fishHistoryFile)
+			}
 		}
 	},
 }
@@ -151,18 +171,10 @@ previous commands and display them for further inspection or use.
 func init() {
 	extractCmd.Flags().BoolP("zsh", "z", false, "Check passwords on ZSH")
 	extractCmd.Flags().BoolP("bash", "b", false, "Check passwords on BASH")
+	extractCmd.Flags().BoolP("fish", "f", false, "Check passwords on FISH")
 	extractCmd.Flags().BoolP("secrets", "s", false, "Check secrets on shell history")
 	extractCmd.Flags().BoolP("all", "a", false, "Check passwords on all shells")
+	extractCmd.Flags().BoolP("redact", "r", false, "Mask detected secrets in terminal output")
 
 	rootCmd.AddCommand(extractCmd)
-
-	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// extractCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// extractCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 }
