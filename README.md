@@ -42,8 +42,10 @@
     <li>
       <a href="#usage">Usage</a>
          <ul>
-            <li><a href="#extract-shell-history">Analyze ZSH History</a></li>
+            <li><a href="#extract-shell-history">Analyze Shell History</a></li>
+           <li><a href="#supported-shells">Supported Shells</a></li>
            <li><a href="#extract-secrets">Regex Scan on Shell History</a></li>
+           <li><a href="#redacting-secrets">Redacting Secrets</a></li>
          </ul>
    </li>
     <li><a href="#reports">Reports</a></li>
@@ -85,8 +87,9 @@ $ nix-env -iA nixpkgs.passdetective
 
 ## Features
 
-- Scans shell command history to detect mistakenly written passwords
-- Identifies API keys and secrets using regular expressions
+- Scans Zsh, Bash and Fish command history to detect mistakenly written passwords
+- Identifies API keys and secrets using over 200 regular expressions
+- Optionally masks detected secrets in the output so you can share a scan without leaking the secret
 - Provides a secure way to review your command history and prevent accidental exposure of sensitive information
 
 <!-- USAGE EXAMPLES -->
@@ -107,6 +110,22 @@ After you have install requirements , you can simply analyze the image via:
 
 ![Extract All](https://i.imgur.com/zKjs3p8.png)
 
+Pick individual shells instead of all of them with `-z`/`--zsh`, `-b`/`--bash` and `-f`/`--fish`:
+
+```shell
+   $ PassDetective extract --zsh --fish
+```
+
+### Supported Shells
+
+| Flag | Shell | History file | Config file |
+| --- | --- | --- | --- |
+| `-z`, `--zsh` | Zsh | `~/.zsh_history` | `~/.zshrc` |
+| `-b`, `--bash` | Bash | `~/.bash_history` | `~/.bashrc` |
+| `-f`, `--fish` | Fish | `~/.local/share/fish/fish_history` | `~/.config/fish/config.fish` |
+
+`-a`/`--all` selects every shell in the table. Each selected shell is scanned independently, and a shell whose files are missing is reported rather than skipped silently.
+
 
 ### Extract Secrets
 
@@ -117,6 +136,22 @@ If you want to specify directory use this command:
 ```
 
 ![Secrets](https://i.imgur.com/yw3v0RI.png)
+
+`--secrets` works with every shell flag, so a Fish history scan is:
+
+```shell
+   $ PassDetective extract --secrets --fish
+```
+
+### Redacting Secrets
+
+A scan prints the offending command line, which means the secret ends up on your screen and in anything you paste it into. Add `-r`/`--redact` to mask the detected secrets while keeping the surrounding command readable:
+
+```shell
+   $ PassDetective extract --secrets --fish --redact
+```
+
+Every secret on a matching line is masked, including when one line matches several patterns at once.
 
 ## Regular Expressions
 PassDetective uses the following regular expressions to identify potential sensitive information:
